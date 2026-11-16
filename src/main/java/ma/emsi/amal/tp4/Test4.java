@@ -12,13 +12,18 @@ import dev.langchain4j.model.google.genai.GoogleGenAiChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.embedding.onnx.bgesmallenv15q.BgeSmallEnV15QuantizedEmbeddingModel;
 import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.input.PromptTemplate;
 
 import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 
+import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.rag.content.retriever.EmbeddingStoreContentRetriever;
 import dev.langchain4j.rag.content.retriever.WebSearchContentRetriever;
 import dev.langchain4j.web.search.WebSearchEngine;
 import dev.langchain4j.web.search.tavily.TavilyWebSearchEngine;
+
+import dev.langchain4j.rag.query.Query;
+import dev.langchain4j.rag.query.router.QueryRouter;
 import dev.langchain4j.rag.query.router.DefaultQueryRouter;
 import dev.langchain4j.rag.DefaultRetrievalAugmentor;
 
@@ -26,6 +31,8 @@ import dev.langchain4j.service.AiServices;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 
 import java.util.List;
+import java.util.Collection;
+import java.util.Map;
 import java.util.Scanner;
 import java.util.logging.ConsoleHandler;
 import java.util.logging.Level;
@@ -133,8 +140,48 @@ public class Test4 {
                         .build();
 
         // 4. Création du QueryRouter avec les deux retrievers
-        DefaultQueryRouter queryRouter =
-                new DefaultQueryRouter(pdfRetriever, webRetriever);
+
+        // Ancienne version du Test 5 :
+        // Le DefaultQueryRouter utilise les deux retrievers
+        // pour toutes les questions.
+        //
+        // DefaultQueryRouter queryRouter =
+        //         new DefaultQueryRouter(pdfRetriever, webRetriever);
+
+        // Nouvelle version : QueryRouter personnalisé
+
+        PromptTemplate template = PromptTemplate.from(
+                "Est-ce que la question '{{question}}' porte sur les notions " +
+                        "expliquées dans le support de cours PDF (RAG, embeddings, " +
+                        "fine-tuning et modèles d'intelligence artificielle) ? " +
+                        "Si la question concerne une actualité récente ou une information " +
+                        "extérieure au contenu du cours, réponds non. " +
+                        "Réponds seulement par oui ou non."
+        );
+
+        QueryRouter queryRouter = new QueryRouter() {
+
+            @Override
+            public Collection<ContentRetriever> route(Query query) {
+
+                String prompt = template.apply(
+                        Map.of("question", query.text())
+                ).text();
+
+                String decision = modele.chat(prompt).trim();
+
+                System.out.println("Question analysée : " + query.text());
+                System.out.println("Décision du LM : " + decision);
+
+                if (decision.equalsIgnoreCase("oui")) {
+                    System.out.println("Utilisation du PDF et du Web.");
+                    return List.of(pdfRetriever, webRetriever);
+                }
+
+                System.out.println("Question extérieure au cours : Web uniquement.");
+                return List.of(webRetriever);
+            }
+        };
 
         // 5. Création du RetrievalAugmentor
         DefaultRetrievalAugmentor retrievalAugmentor =
